@@ -11,6 +11,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let bname = format!("{}Builder", name);
     let bident = syn::Ident::new(&bname, name.span());
 
+    let visibility = ast.vis;
+
     let fields = match ast.data {
         syn::Data::Struct(syn::DataStruct {
             fields: syn::Fields::Named(syn::FieldsNamed { ref named, .. }),
@@ -137,7 +139,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     });
 
     let expanded = quote! {
-        pub struct #bident {
+        #visibility struct #bident {
             #(#builder_fields,)*
         }
 
