@@ -21,90 +21,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
         _ => panic!("can only derive Builder for structs"),
     };
 
-    let builder_fields = fields.iter().map(|prop| {
-        let name = &prop.ident;
-        let ty = &prop.ty;
-
-        if let std::option::Option::Some((_, group)) = attr_group(&prop.attrs, "builder") {
-            let mut tokens = group.stream().into_iter();
-
-            check_builder_attribute(&mut tokens);
-
-            return quote! {
-                #name:  #ty
-            };
-        }
-
-        match inner_type(ty, "Option").is_some() {
-            true => quote! {
-                #name: #ty
-            },
-            false => quote! {
-                #name: std::option::Option<#ty>
-            },
-        }
-    });
-
-    let builder_methods = fields.iter().map(|prop| {
-        let name = &prop.ident;
-        let ty = &prop.ty;
-
-        if let std::option::Option::Some((attr, group)) = attr_group(&prop.attrs, "builder") {
-            let mut tokens = group.stream().into_iter();
-
-            if !check_builder_attribute(&mut tokens) {
-                return syn::Error::new_spanned(
-                    attr.parse_meta().unwrap(),
-                    "expected `builder(each = \"...\")`",
-                )
-                .to_compile_error();
-            }
-
-            let arg = match tokens.next().unwrap() {
-                TokenTree::Literal(l) => l,
-                tt => panic!("expected string, found {:?}", tt),
-            };
-
-            let inner = inner_type(ty, "Vec");
-
-            match syn::Lit::new(arg) {
-                syn::Lit::Str(s) => {
-                    let arg = syn::Ident::new(&s.value(), s.span());
-                    return quote! {
-                        fn #arg<I>(&mut self, #arg: I) -> &mut Self
-                        where
-                            I: Into<#inner>
-                        {
-                            self.#name.push(#arg.into());
-                            self
-                        }
-                    };
-                }
-                lit => panic!("expected string, found {:?}", lit),
-            }
-        }
-
-        match inner_type(ty, "Option") {
-            std::option::Option::Some(inner) => quote! {
-                pub fn #name<I>(&mut self, #name: I) -> &mut Self
-                where
-                    I: Into<#inner>
-                {
-                    self.#name = std::option::Option::Some(#name.into());
-                    self
-                }
-            },
-            std::option::Option::None => quote! {
-                pub fn #name<I>(&mut self, #name: I) -> &mut Self
-                where
-                    I: Into<#ty>
-                {
-                    self.#name = std::option::Option::Some(#name.into());
-                    self
-                }
-            },
-        }
-    });
+    let builder_fields = make_fields(fields.iter());
+    let builder_methods = make_methods(fields.iter());
 
     let set_fields = fields.iter().map(|prop| {
         let name = &prop.ident;
@@ -163,6 +81,99 @@ pub fn derive(input: TokenStream) -> TokenStream {
     };
 
     expanded.into()
+}
+
+fn make_fields<'a>(
+    fields: impl std::iter::Iterator<Item = &'a syn::Field> + 'a,
+) -> Box<dyn std::iter::Iterator<Item = proc_macro2::TokenStream> + 'a> {
+    std::boxed::Box::new(fields.map(|prop| {
+        let name = &prop.ident;
+        let ty = &prop.ty;
+
+        if let std::option::Option::Some((_, group)) = attr_group(&prop.attrs, "builder") {
+            let mut tokens = group.stream().into_iter();
+
+            check_builder_attribute(&mut tokens);
+
+            return quote! {
+                #name:  #ty
+            };
+        }
+
+        match inner_type(ty, "Option").is_some() {
+            true => quote! {
+                #name: #ty
+            },
+            false => quote! {
+                #name: std::option::Option<#ty>
+            },
+        }
+    }))
+}
+
+fn make_methods<'a>(
+    fields: impl std::iter::Iterator<Item = &'a syn::Field> + 'a,
+) -> Box<dyn std::iter::Iterator<Item = proc_macro2::TokenStream> + 'a> {
+    std::boxed::Box::new(fields.map(|prop| {
+        let name = &prop.ident;
+        let ty = &prop.ty;
+
+        if let std::option::Option::Some((attr, group)) = attr_group(&prop.attrs, "builder") {
+            let mut tokens = group.stream().into_iter();
+
+            if !check_builder_attribute(&mut tokens) {
+                return syn::Error::new_spanned(
+                    attr.parse_meta().unwrap(),
+                    "expected `builder(each = \"...\")`",
+                )
+                .to_compile_error();
+            }
+
+            let arg = match tokens.next().unwrap() {
+                TokenTree::Literal(l) => l,
+                tt => panic!("expected string, found {:?}", tt),
+            };
+
+            let inner = inner_type(ty, "Vec");
+
+            match syn::Lit::new(arg) {
+                syn::Lit::Str(s) => {
+                    let arg = syn::Ident::new(&s.value(), s.span());
+                    return quote! {
+                        fn #arg<I>(&mut self, #arg: I) -> &mut Self
+                        where
+                            I: Into<#inner>
+                        {
+                            self.#name.push(#arg.into());
+                            self
+                        }
+                    };
+                }
+                lit => panic!("expected string, found {:?}", lit),
+            }
+        }
+
+        match inner_type(ty, "Option") {
+            std::option::Option::Some(inner) => quote! {
+                pub fn #name<I>(&mut self, #name: I) -> &mut Self
+                where
+                    I: Into<#inner>
+                {
+                    self.#name = std::option::Option::Some(#name.into());
+                    self
+                }
+            },
+            std::option::Option::None => quote! {
+                pub fn #name<I>(&mut self, #name: I) -> &mut Self
+                where
+                    I: Into<#ty>
+                {
+                    self.#name = std::option::Option::Some(#name.into());
+                    self
+                }
+            },
+        }
+    }))
 }
 
 fn inner_type<'a>(ty: &'a syn::Type, name: &str) -> std::option::Option<&'a syn::Type> {
